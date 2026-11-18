@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/ZacxDev/muster-alerts/internal/muster"
+	"github.com/ZacxDev/muster-alerts/internal/textcut"
 )
 
 // MaxListedAlerts bounds how many alerts a task body lists one by one.
@@ -185,11 +185,7 @@ func trimBody(s string) string {
 	if len(s) <= MaxTaskBodyBytes {
 		return s
 	}
-	s = s[:MaxTaskBodyBytes-len(TrimmedMarker)]
-	for len(s) > 0 && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
-	}
-	return s + TrimmedMarker
+	return textcut.Prefix(s, MaxTaskBodyBytes-len(TrimmedMarker)) + TrimmedMarker
 }
 
 func amBody(p AMPayload) string {
