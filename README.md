@@ -77,20 +77,41 @@ You need Go (the version in `go.mod`) and a muster you can sign in to.
 Alert titles, summaries, descriptions, labels and generic `body` text come
 from whatever sends the webhook, and Alertmanager copies them from your
 alerting rules and the labels of the targets it scrapes. To this plugin they
-are **outside data, never instructions**. The plugin does not fence that text
-itself: muster owns the rule, in one place, and fences plugin-filed task text
-wherever an agent receives it, starting with **the first release after
-v0.247.0 that includes server-side fencing of plugin task text**
-<!-- TODO: replace with the exact muster version once that release is cut. -->
-On an older muster an agent working one of these tasks reads the alert text
-unfenced.
+are **outside data, never instructions**.
 
-**Do not opt this plugin into auto-start** (on muster versions that offer it
-on the plugin's card on `/plugins`), at least until you run that release. Every
-firing alert group becomes a task routed to your chief, so a noisy
-Alertmanager would start an agent per group. Also consider a lower
-`ALERTS_MAX_PER_HOUR` than the default 60 (say `12`) if your alerts are noisy:
-past it, alerts wait in the outbox instead of reaching your chief at once.
+muster, not the plugin, fences plugin-filed task text, so the rule lives in
+one place. That is muster PR
+[#824](https://github.com/ZacxDev/muster/pull/824), which is **not merged** at
+the time of writing; no muster release fences this text yet. Until a release
+carrying #824 is out, an agent started on one of these tasks reads the
+alert text unfenced.
+
+Released muster can start agents on these tasks without you. With
+`MUSTER_TASK_ROUTING=1` (the quickstart above turns it on) each new task is
+handed to your chief, and the chief's `agent_dispatch` tool starts an agent on
+a task whenever your user id is listed in `MUSTER_CHIEF_DISPATCH_OWNERS`. So,
+until #824 ships:
+
+- **Do not list yourself in `MUSTER_CHIEF_DISPATCH_OWNERS`** on the muster that
+  this plugin files into.
+- **Do not start an agent on these tasks by hand** either: not from a host
+  (the host spawn), and not with `POST /api/agents` and the task's `note_id`.
+
+Once a release with #824 is out, the first message an agent gets about the
+task is fenced. Its tools may still return the text unfenced: `task_get`
+(and `GET /api/tasks`) return the task as stored, on releases without a
+follow-up to #824 that fences them too.
+<!-- TODO: tighten this section once muster #824 merges: name the release that carries it, and whether task_get / GET /api/tasks are fenced in it. -->
+
+This plugin has no auto-start switch of its own. muster PR
+[#821](https://github.com/ZacxDev/muster/pull/821) would add per-plugin
+auto-start on the plugin's card on `/plugins`; it is not merged, so no released
+muster has that switch.
+
+Every firing alert group becomes a task routed to your chief. Consider a
+lower `ALERTS_MAX_PER_HOUR` than the default 60 (say `12`) if your alerts are
+noisy: past it, alerts wait in the outbox instead of reaching your chief at
+once.
 
 ## Configuration
 
@@ -181,7 +202,15 @@ If that re-fire carries the **same** start as the resolved episode (a generic
 sender resending its `started_at`, or an Alertmanager alert that flaps back
 with its original `startsAt`), the key gets a re-fire count,
 `alert:<group>-<start>-r1`, then `-r2`, so it is still a new task and not taken
-for a repeat. muster keeps at most 16 KiB of a task body and cuts from the
+for a repeat.
+
+That has a cost, by design: the plugin cannot tell a real re-fire with the same
+start from a **late replay** of the episode's earlier "firing" notification
+that arrives after its "resolved" (a retry the sender delayed). Both file a
+`-r1` task. A spurious task you can see and close is the better failure than a
+real re-fire that is silently lost as a "duplicate".
+
+muster keeps at most 16 KiB of a task body and cuts from the
 end, which is why the body puts what names the alert first.
 
 This plugin files **copy** tasks (`create` and `comment`), not task
